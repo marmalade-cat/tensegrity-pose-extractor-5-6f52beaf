@@ -1,0 +1,124 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>tensegrity-pose-extractor-5 — prototype</title>
+<style>
+body{font-family:Arial,sans-serif;margin:20px;color:#222}
+button{margin:6px}
+textarea{width:100%;height:120px}
+pre{background:#f6f6f6;padding:8px}
+.row{display:flex;gap:12px}
+.panel{flex:1}
+</style>
+</head>
+<body>
+<h2>tensegrity-pose-extractor-5 — prototype</h2>
+<p>I am Marmalade. This small prototype loads two example inputs (JSON and CSV), parses them, normalizes module poses to a canonical CSV (id,x,y,z,rx,ry,rz), and shows a tiny 2D preview.</p>
+<div class="row">
+  <div class="panel">
+    <h4>Input (pick example)</h4>
+    <button id="loadJson">Load example JSON</button>
+    <button id="loadCsv">Load example CSV</button>
+    <p><small>Or paste your data below (JSON or CSV).</small></p>
+    <textarea id="input"></textarea>
+    <div>
+      <button id="normalize">Normalize -> CSV</button>
+      <button id="download" disabled>Download CSV</button>
+    </div>
+  </div>
+  <div class="panel">
+    <h4>Output (normalized CSV)</h4>
+    <pre id="output">(empty)</pre>
+  </div>
+</div>
+<h4>2D Preview (x,y positions)</h4>
+<canvas id="canvas" width="400" height="300" style="border:1px solid #ccc"></canvas>
+<script>
+// Example inputs
+const exampleJson = JSON.stringify({modules:[{uid:'A1',pos:[0.5,0.2,0.0],rot:[0,0,0]},{uid:'B2',pos:[-0.2,0.8,0.1],rot:[0.1,0.2,0]}]},null,2);
+const exampleCsv = 'id,X,Y,Z,roll,pitch,yaw\nM-01,0.1,0.2,0.0,0,0,0\nM-02,0.6,0.4,0.05,0.0,0.2,0.1\n';
+
+// UI refs
+const inputEl = document.getElementById('input');
+const outputEl = document.getElementById('output');
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+document.getElementById('loadJson').onclick = ()=> inputEl.value = exampleJson;
+document.getElementById('loadCsv').onclick = ()=> inputEl.value = exampleCsv;
+
+function parseInput(text){
+  text = text.trim();
+  // Try JSON
+  try{
+    const obj = JSON.parse(text);
+    // Support a couple simple JSON shapes
+    if(obj.modules && Array.isArray(obj.modules)){
+      return obj.modules.map(m=>({id:m.uid||m.id, x:+(m.pos&&m.pos[0]||0), y:+(m.pos&&m.pos[1]||0), z:+(m.pos&&m.pos[2]||0), rx:+(m.rot&&m.rot[0]||0), ry:+(m.rot&&m.rot[1]||0), rz:+(m.rot&&m.rot[2]||0)}));
+    }
+  }catch(e){}
+  // Fallback: parse CSV
+  const lines = text.split(/\r?\n/).filter(l=>l.trim());
+  if(lines.length===0) return [];
+  const hdr = lines[0].split(/,\s*/).map(h=>h.toLowerCase());
+  const rows = lines.slice(1).map(l=>l.split(/,\s*/));
+  return rows.map(cols=>{
+    const map = {};
+    hdr.forEach((h,i)=>map[h]=cols[i]);
+    return {
+      id: map['id']||map['name']||('m'+Math.random()).slice(2,6),
+      x: + (map['x']||map['X']||map['posx']||map['px']||0),
+      y: + (map['y']||map['Y']||map['posy']||map['py']||0),
+      z: + (map['z']||map['Z']||map['posz']||map['pz']||0),
+      rx: + (map['roll']||map['rx']||0),
+      ry: + (map['pitch']||map['ry']||0),
+      rz: + (map['yaw']||map['rz']||0)
+    };
+  });
+}
+
+function toCsv(entries){
+  const hdr = ['id','x','y','z','rx','ry','rz'];
+  const lines = [hdr.join(',')].concat(entries.map(e=>hdr.map(h=>e[h]).join(',')));
+  return lines.join('\n');
+}
+
+function drawPreview(entries){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  // find bounds
+  if(entries.length===0) return;
+  const xs = entries.map(e=>e.x); const ys = entries.map(e=>e.y);
+  const minx = Math.min(...xs), maxx = Math.max(...xs);
+  const miny = Math.min(...ys), maxy = Math.max(...ys);
+  const pad = 0.1 * Math.max(maxx-minx||1, maxy-miny||1);
+  const wx = (minx-pad), ex = (maxx+pad), wy=(miny-pad), ey=(maxy+pad);
+  function sx(x){ return (x-wx)/(ex-wx)*canvas.width; }
+  function sy(y){ return canvas.height - (y-wy)/(ey-wy)*canvas.height; }
+  entries.forEach(e=>{
+    ctx.beginPath(); ctx.arc(sx(e.x), sy(e.y), 6,0,Math.PI*2); ctx.fillStyle='#e67'; ctx.fill();
+    ctx.fillStyle='#000'; ctx.font='11px sans-serif'; ctx.fillText(e.id, sx(e.x)+8, sy(e.y)+4);
+  });
+}
+
+document.getElementById('normalize').onclick = ()=>{
+  const entries = parseInput(inputEl.value);
+  const csv = toCsv(entries);
+  outputEl.textContent = csv;
+  drawPreview(entries);
+  document.getElementById('download').disabled = entries.length===0;
+  // store for download
+  window._lastCsv = csv;
+};
+
+document.getElementById('download').onclick = ()=>{
+  const csv = window._lastCsv || '';
+  const blob = new Blob([csv],{type:'text/csv'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = 'normalized_poses.csv'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+};
+
+// Load an example at start
+inputEl.value = exampleJson;
+</script>
+</body>
+</html>
